@@ -1,0 +1,259 @@
+---
+title: "01-explore-tweets"
+author: "Josue Rodriguez"
+date: "12/1/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.width = 7,
+  fig.height = 7,
+  fig.width = 10,
+  dpi = 320,
+  fig.align = "center",
+  cache = TRUE
+)
+
+
+# load fonts
+# extrafont::loadfonts()
+```
+
+# Overview
+
+This project set out to explore whether there were differences in the online communities corresponding to the `R`, `Python`, and `Julia` programming languages. To do so, I used `Python` to
+scrape the `#rstats`, `#pydata`, and `#julialang` Twitter hashtags. I examined these tweets using word-frequncies, tf-idf, sentiment analysis, and structural topic modeling. 
+
+# load in libraries and read in data
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytext)
+library(drlib)
+library(scales)
+library(ggpubr)
+library(cowplot)
+
+data("stop_words")
+
+tweets <- read_csv('tweet_results.csv')
+tweets
+```
+
+# prelim exploration
+
+```{r message=FALSE}
+# additional stop words (i.e., words of no value to us)
+additional_stop_words <- c("xe2", "x80", "b'rt", "pydata", "rstats", "t.co",
+                           "x94", "https", "hnwuqaqrcx", "xa6", "x9f", "xf0", "rstats", 
+                           "julialang", "pystats", "pydata", "python", "r", "julia",
+                           "nhttps", "rt", "iiot", "b'julia", "1.3", "y5w2ntksxt")
+
+# tweets %>% 
+#   distinct %>%
+#   count(language)
+
+tweets_cleaned <-
+  tweets %>% 
+  # distinct %>% 
+  unnest_tokens(word, tweet) %>% 
+  anti_join(stop_words) %>% 
+  filter(!word %in% additional_stop_words) 
+  # group_by(language) %>% 
+
+top_ten <- 
+  tweets_cleaned %>% 
+  count(language, word) %>% 
+  group_by(language) %>% 
+  mutate(perc = n / sum(n)) %>% 
+  top_n(10) %>% 
+  ungroup
+
+# set options for plot
+windowsFonts(Times = windowsFont("Century Gothic"))
+pal <- wesanderson::wes_palette("Darjeeling1")
+
+# plot top words by count
+top_ten %>% 
+  mutate(word = reorder_within(word, perc, language)) %>% 
+  ggplot(aes(word, perc, fill = language)) +
+  geom_col(alpha = 0.6, show.legend = FALSE) +
+  scale_x_reordered() +
+  scale_y_continuous(labels = percent_format(accuracy = .1)) +
+  scale_fill_manual(values = pal) +
+  facet_wrap(~ language, scale = "free") +
+  coord_flip() +
+  labs(title = "Most Frequent Words by Programming Language",
+       x = "Word",
+       y = "Percent of Total Words") +
+  theme_pubclean() 
+```
+
+
+```{r sentiment, message=FALSE}
+# calculate sentiment scores
+tweet_sentiments <- 
+  tweets_cleaned %>% 
+  mutate(tweet_num = row_number()) %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  count(language, index = tweet_num %/% 50, sentiment) %>% 
+  spread(sentiment, n, fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+
+ggplot(tweet_sentiments, aes(sentiment, fill = language)) +
+  geom_histogram(bins = 20, show.legend = FALSE) +
+  facet_wrap(~ language, scales = "free_y") +
+  scale_fill_manual(values = pal) +
+  theme_pubclean()
+```
+
+# TF-IDF
+
+```{r tf-idf-plot}
+# create tf-idf, sort by top language and get top ten
+tweets_tf_idf <- 
+  tweets_cleaned %>% 
+  count(language, word, sort = TRUE) %>% 
+  bind_tf_idf(term = word, document = language, n = n) %>% 
+  arrange(-tf_idf) %>% 
+  group_by(language) %>% 
+  top_n(10) %>% 
+  ungroup
+
+# plot tf-idf
+tweets_tf_idf %>% 
+  mutate(word = reorder_within(word, tf_idf, within = language)) %>% 
+  ggplot(aes(word, tf_idf, fill = language)) +
+  geom_col(alpha = 0.7, show.legend = FALSE) +
+  facet_wrap(~ language, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  scale_fill_manual(values = pal) +
+  theme_pubclean()
+```
+
+# Structural Topic Modeling
+
+```{r tweets-dfm}
+# create sparse matrix with one term per document, per row
+tweets_dfm <- 
+  tweets_cleaned %>% 
+  count(language, word, sort = TRUE) %>% 
+  cast_dfm(document = language, term = word, value = n)
+```
+
+```{r stm, eval=FALSE}
+# create topic models
+library(stm)
+
+# recommended topics for small corpora is 3 - 10
+# models were ran and written out to files to avoid re-running
+stm.3 <- stm(tweets_dfm, K = 3, verbose = FALSE, init.type = "Spectral")
+stm.4 <- stm(tweets_dfm, K = 4, verbose = FALSE, init.type = "Spectral")
+stm.5 <- stm(tweets_dfm, K = 5, verbose = FALSE, init.type = "Spectral")
+stm.6 <- stm(tweets_dfm, K = 6, verbose = FALSE, init.type = "Spectral")
+```
+
+
+```{r stm-plot-functions}
+load("02-stm-data.RData")
+
+pal <- viridis::viridis(6)
+
+# create functions to tidy stm output and plot
+
+plot_stm_beta <- function(topic_model) {
+  # suppress messages from following code block
+  suppressMessages({
+    # create dataframe with topic and beta weight
+    td_beta <- broom::tidy(topic_model)
+    
+    # grab top 10 words associated with each topic
+    plotting_data <- 
+      td_beta%>% 
+      group_by(topic) %>% 
+      top_n(10) %>% 
+      ungroup %>% 
+      mutate(topic = factor(paste("Topic", topic)),
+             term  = reorder_within(term, beta, within = topic)) 
+    })
+  
+  # create plot of each topic and associated words
+  beta_plot <- 
+    ggplot(plotting_data, aes(term, beta, fill = topic)) +
+    geom_col(alpha = 0.7, show.legend = FALSE) +
+    facet_wrap(~ topic, scales = "free_y") +
+    scale_fill_manual(values = pal) +
+    scale_x_reordered() +
+    coord_flip() +
+    ylab(expression(beta)) +
+    theme_pubclean()
+  
+  # print plot out
+  return(beta_plot)
+}
+
+plot_stm_gamma <- function(topic_model) {
+  # create dataframe with topic and gamma weight
+  td_gamma <- broom::tidy(topic_model,
+                          matrix = "gamma",
+                          document_names = rownames(tweets_dfm))
+  
+  # grab probabilites that each topic is 
+  # associated with X number of languages
+  plotting_data <-
+    td_gamma %>%
+    mutate(topic = factor(paste("Topic", topic)))
+  
+  # create plot
+  gamma_plot <- 
+    ggplot(plotting_data, aes(gamma, fill = topic)) +
+    geom_histogram(alpha = 0.7, show.legend = FALSE, bins = 30) +
+    facet_wrap(~ topic) +
+    scale_y_continuous(breaks = c(1,2, 3)) +
+    scale_fill_manual(values = pal) +
+    ylab(expression(gamma)) +
+    theme_pubclean() +
+    theme(axis.text.x = element_text())  
+  # print plot
+  return(gamma_plot)
+}
+```
+
+## 3 Topics
+
+```{r plot-3-topics}
+pb3 <- plot_stm_beta(stm.3) 
+pg3 <- plot_stm_gamma(stm.3) 
+plot_grid(pb3, pg3, nrow = 2)
+```
+
+## 4 Topics
+
+```{r plot-4-topics}
+pb4 <- plot_stm_beta(stm.4) 
+pg4 <- plot_stm_gamma(stm.4) 
+
+plot_grid(pb4, pg4, nrow = 2)
+```
+
+## 5 Topics
+
+```{r plot-5-topics}
+pb5 <- plot_stm_beta(stm.5) 
+pg5 <- plot_stm_gamma(stm.5)
+
+plot_grid(pb5, pg5, nrow = 2)
+```
+
+## 6 Topics
+
+```{r plot-6-topics}
+pb6 <- plot_stm_beta(stm.6) 
+pg6 <- plot_stm_gamma(stm.6)
+
+plot_grid(pb6, pg6, nrow = 2)
+```
