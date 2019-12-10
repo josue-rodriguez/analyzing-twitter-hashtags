@@ -1,0 +1,73 @@
+---
+title: "01-explore-tweets"
+author: "Josue Rodriguez"
+date: "12/1/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# load in libraries and read in data
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytext)
+library(drlib)
+library(firatheme)
+library(scales)
+
+data("stop_words")
+
+tweets <- read_csv('tweet_results.csv')
+tweets
+```
+
+# prelim exploration
+
+```{r message=FALSE}
+# additional stop words (i.e., words of no value to us)
+additional_stop_words <- c("xe2", "x80", "b'rt", "pydata", "rstats", "t.co",
+                           "x94", "https", "hnwuqaqrcx", "xa6", "x9f", "xf0", "rstats", 
+                           "julialang", "pystats", "pydata", "python", "r", "julia",
+                           "nhttps", "rt", "iiot")
+
+# tweets %>% 
+#   distinct %>%
+#   count(language)
+
+top_five <-
+  tweets %>% 
+  distinct %>% 
+  unnest_tokens(word, tweet) %>% 
+  anti_join(stop_words) %>% 
+  filter(!word %in% additional_stop_words) %>% 
+  # group_by(language) %>% 
+  count(language, word) %>% 
+  group_by(language) %>% 
+  mutate(perc = n / sum(n)) %>% 
+  top_n(10) %>% 
+  ungroup
+
+
+windowsFonts(Times = windowsFont("Helvetica"))
+top_five %>% 
+  mutate(word = reorder_within(word, perc, language)) %>% 
+  ggplot(aes(word, perc, fill = language)) +
+  geom_col(position = "dodge") +
+  scale_x_reordered() +
+  scale_y_continuous(labels = percent_format()) +
+  facet_wrap(~ language, scale = "free") +
+  coord_flip() +
+  scale_fill_fira() +
+  guides(fill = FALSE) +
+  labs(title = "Most Frequent Words by Programming Language",
+       x = "Word",
+       y = "Percent of Total Words") +
+  ggpubr::theme_pubclean() + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+# ,
+#         text = element_text(family = Times))
+```
+

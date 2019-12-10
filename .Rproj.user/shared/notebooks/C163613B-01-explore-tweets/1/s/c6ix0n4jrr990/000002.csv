@@ -1,0 +1,9 @@
+"0","# create sparse matrix with one term per document, per row"
+"0","tweets_dfm <- "
+"0","  tweets_cleaned %>% "
+"0","  count(language, word, sort = TRUE) %>% "
+"0","  cast_dfm(document = language, term = word, value = n)"
+"2","Registered S3 method overwritten by 'data.table':
+  method           from
+  print.data.table     
+"

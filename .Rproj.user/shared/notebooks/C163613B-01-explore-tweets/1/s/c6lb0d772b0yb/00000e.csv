@@ -1,0 +1,3 @@
+"0","pb3 <- plot_stm_beta(stm.3) + labs(title = ""Words of Importance to the Identified Topics"", subtitle = """")"
+"0","pg3 <- plot_stm_gamma(stm.3) + labs(title = ""Probability of Topic Belonging to Communities"")"
+"0","plot_grid(pb3, pg3, nrow = 2)"
